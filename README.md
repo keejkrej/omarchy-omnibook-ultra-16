@@ -26,12 +26,12 @@ Hardware documentation, kernel diagnostics, and issue tracking for running **Oma
 | **Wi-Fi 7 & Bluetooth** | Working | MediaTek `mt7925e` and `btusb` work out of the box |
 | **NVMe Storage** | Working | PCIe Gen4 x4 NVMe with LUKS + Btrfs |
 | **Camera** | Working | HP 5MP USB Camera (`30c9:00fb`, `uvcvideo`) |
-| **Lid Close (Panel Off)** | Working | Hardware/EC turns off panel on lid close (`\_SB.LID0._LID` ACPI query aborts via `RBUF`) |
+| **Lid Close (Panel Off & `_LID`)** | **Working (Fixed via [`kmod/`](kmod/))** | Hardware panel off works natively; `_LID` state (`open`/`closed`) works with `omnibook_ffa_fix` |
 | **Physical Battery Charging** | Working (Hardware) | Autonomous EC + charger IC manages USB-C PD negotiation and CC/CV battery charging in hardware |
-| **Battery & AC Status (`BAT0`, `ADP1`)** | **Broken** | `/sys/class/power_supply/` is empty; `\_SB.BAT0._STA` and `\_SB.ADP1._PSR` abort in `\_SB.FFA0.RBUF` with `AE_AML_BUFFER_LIMIT` |
-| **Thermal Zone (`TZ01`) & Fan (`FAN0`)** | **Broken** | `\_TZ.TZ01._TMP` and `\_SB.FAN0.F1LS` abort in `\_SB.FFA0.RBUF` with `AE_AML_BUFFER_LIMIT` |
-| **USB-C UCSI (`USBC000:00`)** | **Broken** | `\_SB.USC1._DSM` -> `\_SB.FFA0.EC14` -> `\_SB.FFA0.RBUF` aborts (`ucsi_acpi` probe fails with `-EIO`) |
-| **EC Notifications (`ARML0002:00`)** | **Broken** | `\_SB.FFA0._DSM` aborts in `\_SB.FFA0.RBUF` (`nvidia-ffa ARML0002:00: Failed to execute notify`) |
+| **Battery & AC Status (`BAT0`, `ADP1`)** | **Working (Fixed via [`kmod/`](kmod/))** | `omnibook_ffa_fix` patches `\_SB.FFA0.RBUF` and redirects `\_SB.BAT0._BST` -> `UPBS()`; exposes `BAT0` (99.3 Wh) and `ADP1` to `upower` and `omarchy-shell` |
+| **Thermal Zone (`TZ01`) & Fan (`FAN0`)** | **Working (Fixed via [`kmod/`](kmod/))** | `TZ01` registers as `thermal_zone1` (`acpitz`) and `FAN0` reports RPM once `\_SB.FFA0.RBUF` is patched |
+| **USB-C UCSI (`USBC000:00`)** | **Working (Fixed via [`kmod/`](kmod/))** | `ucsi_acpi` binds `typec port0` & `port1` (`usb4_port1`, `ucsi-source-psy-USBC000:001`/`002`) once `\_SB.FFA0.RBUF` is patched |
+| **EC Notifications (`ARML0002:00`)** | **Working (Fixed via [`kmod/`](kmod/))** | `\_SB.FFA0._DSM` EC event notifications succeed once `\_SB.FFA0.RBUF` is patched |
 
 ## Detailed Documentation & Kernel Fix
 

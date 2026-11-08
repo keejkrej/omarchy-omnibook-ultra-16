@@ -222,3 +222,34 @@ The [`kmod/`](../kmod/) directory contains an out-of-tree kernel module (`omnibo
 cd kmod
 ./install.sh
 ```
+
+### Verified Kernel & User-Space Output After Loading `omnibook_ffa_fix`
+
+```text
+omnibook_ffa_fix: Patched \_SB.FFA0.RBUF CreateField DATA bit length (0x0190 -> 0x0130 at +0x64)
+omnibook_ffa_fix: Redirected \_SB.BAT0._BST to evaluate \_SB.BAT0.UPBS()
+omnibook_ffa_fix: \_SB.BAT0 status updated (ret=0, present=1, enabled=1)
+omnibook_ffa_fix: Created platform device PNP0C0A:00 for \_SB.BAT0
+ACPI: battery: Slot [BAT0] (battery present)
+omnibook_ffa_fix: Re-probed platform device PNP0C0A:00 (ret=1)
+ACPI: AC: AC Adapter [ADP1] (off-line)
+omnibook_ffa_fix: Re-probed platform device ACPI0003:00 (ret=1)
+acpi LNXTHERM:00: registered as thermal_zone1
+ACPI: thermal: Thermal Zone [TZ01] (32 C)
+omnibook_ffa_fix: Re-probed platform device LNXTHERM:00 (ret=1)
+omnibook_ffa_fix: Re-probed platform device USBC000:00 (ret=1)
+typec port0: bound usb2-port1 (ops connector_ops)
+typec port0: bound usb4_port1 (ops connector_ops [thunderbolt])
+typec port0: bound usb1-port1 (ops connector_ops)
+typec port1: bound usb4-port1 (ops connector_ops)
+typec port1: bound usb4_port1 (ops connector_ops [thunderbolt])
+typec port1: bound usb3-port1 (ops connector_ops)
+```
+
+```text
+$ ls /sys/class/power_supply/
+ADP1  BAT0  ucsi-source-psy-USBC000:001  ucsi-source-psy-USBC000:002
+
+$ omarchy-battery-status
+Battery 53%  ·  2h 42m left  ·   19.4W / 98Wh
+```
