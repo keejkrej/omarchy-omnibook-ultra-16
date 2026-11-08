@@ -45,25 +45,90 @@ On NVIDIA N1X / GB10 platforms, the OS does not talk to the Embedded Controller 
   2. **DEN0077A v1.3 ALP5 Spec (`_HID` `ARML0002`, FFH offset `2`)**:
      - Packet header (`FFA_REQ_PACKET` / `FFA_RSP_PACKET`): `status` (8B, bit 0..63) + `recvid` (8B, bit 64..127) + `uuid` (16B, bit 128..255) = **32 bytes (256 bits)** before `rawdata[]`.
 
-### Why `\_SB.FFA0.RBUF` Fails on HP BIOS `F.06`
+### Decompiled `DSDT.dsl` Analysis (BIOS `F.06`)
 
-In HP BIOS `F.06` on the OmniBook Ultra 16-bk0xxx (`8E6A`):
+Decompiling `/sys/firmware/acpi/tables/DSDT` (`iasl -d DSDT`) reveals **two separate ACPI DSDT bugs** in HP BIOS `F.06`:
 
-1. `\_SB.FFA0` declares `_HID` `ARML0002`.
-2. Inside `\_SB.FFA0.RBUF`, the AML code attempts to create a 400-bit (50-byte) buffer field named `DATA` starting at bit offset `208` (byte offset `26`):
-   ```asl
-   CreateField (<Buffer>, 208, 400, DATA)
-   ```
-3. However, the target `Buffer` passed to `CreateField` is only **512 bits (64 bytes / `0x40` bytes)** long:
-   - Required size: `208 bits (26 bytes header) + 400 bits (50 bytes DATA) = 608 bits (76 bytes / 0x4C bytes)`
-   - Actual target buffer size: `512 bits (64 bytes / 0x40 bytes)`
-   - Overflow: `608 - 512 = 96 bits (12 bytes)` past the end of the buffer.
-4. In Linux ACPICA (`drivers/acpi/acpica/dsopcode.c:198`, `acpi_ds_create_buffer_field` / `acpi_ds_get_buffer_field_arguments`), ACPICA strictly validates `(bit_offset + bit_length) <= buffer_bit_length`:
-   ```text
-   ACPI BIOS Error (bug): AE_AML_BUFFER_LIMIT, Field [DATA] at bit offset/length 208/400 exceeds size of target Buffer (512 bits) (20260408/dsopcode-198)
-   ACPI Error: Aborting method \_SB.FFA0.RBUF due to previous error (AE_AML_BUFFER_LIMIT) (20260408/psparse-543)
-   ```
-5. Note also that bit offset `208` (26 bytes) matches the legacy draft spec (`FFA_RSP_PACKET` with 1B status + 1B length + 16B UUID + 8B ffa_status = 26 bytes = 208 bits, as seen in OpenDevicePartnership `ectest.asl`: `CreateField(BUFF, 208, ...)`), whereas `nvidia-ffa-ec.c` selects `ffa_ec_legacy_spec = false` when matching `_HID` `ARML0002`.
+#### Bug 1: Unused Out-of-Bounds `DATA` Field in `\_SB.FFA0.RBUF` (`DSDT.dsl` lines 17395–17441)
+
+`\_SB.FFA0` uses standard `ARML0002` (`OperationRegion (AFFH, FFixedHW, 0x02, 0x90)`) with a 32-byte header (`BFX0` at `0x00`, `BFX1` at `0x08`, `BX23` UUID at `0x10`, payload starting at byte `0x20`). However, `Method (RBUF)` contains an unused leftover `CreateField (BUFF, 0xD0, 0x0190, DATA)` definition:
+
+```asl
+Method (RBUF, 4, Serialized)
+{
+    If ((AVAL () == One))
+    {
+        ERST ()
+        Local0 = Acquire (ECMU, 0xFFFF)
+        Name (BUFF, Buffer (0x40){})
+        CreateQWordField (BUFF, Zero, BFX0)
+        CreateQWordField (BUFF, 0x08, BFX1)
+        CreateField (BUFF, 0x80, 0x80, BX23)
+        CreateByteField (BUFF, 0x20, CMDD)
+        CreateDWordField (BUFF, 0x21, ADDR)
+        CreateByteField (BUFF, 0x25, DLEN)
+        CreateField (BUFF, 0xD0, 0x0190, DATA) // <-- BUG: 208 + 400 = 608 bits > 512 bits (0x40 bytes), and DATA is never referenced!
+        If ((Local0 == Zero))
+        {
+            Local1 = Zero
+            While (One)
+            {
+                If ((Local1 == 0x02))
+                {
+                    Release (ECMU)
+                    Break
+                }
+
+                BFX0 = Zero
+                BFX1 = Zero
+                BX23 = Arg0
+                CMDD = Arg1
+                ADDR = Arg2
+                DLEN = Arg3
+                BUFF = FFAC = BUFF /* \_SB_.FFA0.RBUF.BUFF */
+                If ((BFX0 == Zero))
+                {
+                    Release (ECMU)
+                    Break
+                }
+
+                Sleep (One)
+                Local1 += One
+            }
+        }
+
+        Return (BUFF) /* \_SB_.FFA0.RBUF.BUFF */
+    }
+
+    Return (Zero)
+}
+```
+
+- `DATA` is **never read or written** inside `RBUF`; callers receive `Return (BUFF)` and extract response bytes at offset `0x20` (`CreateByteField (BUFF, 0x20, ...)`).
+- Because `0xD0 + 0x0190 = 608 bits > 512 bits`, ACPICA (`acpi_ds_init_buffer_field`) aborts `RBUF` with `AE_AML_BUFFER_LIMIT` before the FF-A transaction (`BUFF = FFAC = BUFF`) ever executes.
+
+#### Bug 2: `\_SB.BAT0._BST` Calls NVIDIA Reference `SREQ` Instead of HP's `UPBS()` (`DSDT.dsl` lines 19979–20301)
+
+In `Device (BAT0)`:
+- `_BIF` calls `UPBI()` and `_BIX` calls `UPBX()`, both of which read battery static info from HP's EC partition (`884a63a0-3285-4120-83aa-eec008a0a546`, bound to `arm-ffa-17`) via `^^FFA0.RBUF`.
+- Right below `UPBI()` is `Method (UPBS, 0, NotSerialized)` (lines 20213–20301), which reads live battery current (`0x06000383`), remaining capacity (`0x06000385`), voltage (`0x06000387`), and charging state (`0x06000382`) via `^^FFA0.RBUF` on `884a63a0-3285-4120-83aa-eec008a0a546` and populates `PBST[0..3]`.
+- However, `Method (_BST)` (lines 19979–19998) was left with NVIDIA's reference `SREQ(Local0, HPBM)` call targeting UUID `25cb5207-ac36-427d-aaef-3aa78877d27e` (which does not exist on the HP OmniBook Ultra 16) and **never calls `UPBS()`**:
+
+```asl
+Method (_BST, 0, NotSerialized)  // _BST: Battery Status
+{
+    Local0 = Buffer (0x08){}
+    CreateByteField (Local0, Zero, CMDD)
+    CMDD = 0x02
+    Local1 = SREQ (Local0, HPBM) // <-- Fails: UUID 25cb5207-ac36-427d-aaef-3aa78877d27e does not exist on HP
+    If ((DerefOf (Local1 [Zero]) == Zero))
+    {
+        ...
+    }
+
+    Return (PBST) /* \_SB_.BAT0.PBST */
+}
+```
 
 ---
 
@@ -140,12 +205,20 @@ Nov 08 03:44:44 rtxspark kernel: nvidia-ffa ARML0002:00: Failed to execute notif
 
 ---
 
-## 6. Potential Fixes / Kernel Quirk Directions for `linux-omarchy`
+## 6. Live Kernel Module Fix (`kmod/omnibook_ffa_fix.c`)
 
-1. **ACPICA `CreateField` Buffer Auto-Extension / Clamping (or `\_SB.FFA0.RBUF` Method Override)**:
-   - In `drivers/acpi/acpica/dsopcode.c` (`acpi_ds_get_buffer_field_arguments`), when `bit_offset + bit_length > buffer_bit_length` on a `CreateField` operation (specifically `DATA` at `208/400` on a `512`-bit buffer), either clamp `bit_length` to `buffer_bit_length - bit_offset` (`512 - 208 = 304` bits = 38 bytes) or reallocate/extend the target `Buffer` to `(bit_offset + bit_length + 7) / 8` bytes (`76` bytes).
-2. **`nvidia-ffa-ec.c` Packet Format / Offset Check for HP OmniBook Ultra 16-bk0xxx (`8E6A`)**:
-   - Inspect the decompiled DSDT (`/sys/firmware/acpi/tables/DSDT`) for `\_SB.FFA0` on board `8E6A` (BIOS `F.06`) to verify:
-     - Which `FFixedHW` OperationRegion offset (`2` vs `4`) `\_SB.FFA0.AFFH` declares.
-     - Whether `\_SB.FFA0` uses the 18-byte/26-byte legacy `MSFT000C` packet layout despite declaring `_HID` `ARML0002`, or if `RBUF` is purely a response-unpacking helper whose input buffer is 64 bytes.
-   - Add a DMI/board quirk for `HP OmniBook Ultra Laptop 16-bk0xxx` (`board_name` = `8E6A`) in `pkgbuilds/linux-omarchy-aarch64` alongside existing N1X laptop quirks (`1011-n1x-dell-xps16-battery-status.patch`, `1012-n1x-acpi-thermal-skip-power-telemetry.patch`).
+The [`kmod/`](../kmod/) directory contains an out-of-tree kernel module (`omnibook_ffa_fix.ko`, with DKMS support) that fixes both DSDT bugs at runtime without requiring a custom kernel build or reboot:
+
+1. **Clamps `\_SB.FFA0.RBUF`'s `CreateField` bit length**:
+   - Locates `\_SB.FFA0.RBUF`'s `union acpi_operand_object` (`ACPI_TYPE_METHOD`), duplicates its AML bytecode, patches `CreateField (BUFF, 0xD0, 0x0190, DATA)` (`5b 13 42 55 46 46 0a d0 0b 90 01 44 41 54 41`) from `0x0190` (`400` bits) to `0x0130` (`304` bits, fitting cleanly inside the 512-bit `Buffer (0x40)`), and updates `method.aml_start`.
+2. **Redirects `\_SB.BAT0._BST` to `UPBS()`**:
+   - Replaces `\_SB.BAT0._BST`'s AML body with `55 50 42 53 a4 50 42 53 54` (`UPBS () Return (PBST)`), bypassing the broken `SREQ` call to non-existent UUID `25cb5207-ac36-427d-aaef-3aa78877d27e`.
+3. **Re-enumerates and attaches EC-dependent ACPI devices**:
+   - Evaluates `\_SB.BAT0._STA` via `acpi_bus_get_status()`, creates the `PNP0C0A:00` platform device via `acpi_create_platform_device()`, and triggers `device_attach()` on `PNP0C0A:00` (`BAT0`), `ACPI0003:00` (`ADP1`), `LNXTHERM:00` (`TZ01`), `USBC000:00` (`USC1`), and `PNP0C0B:00` (`FAN0`).
+
+### Build & Install
+
+```bash
+cd kmod
+./install.sh
+```

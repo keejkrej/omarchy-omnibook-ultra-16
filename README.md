@@ -33,7 +33,8 @@ Hardware documentation, kernel diagnostics, and issue tracking for running **Oma
 | **USB-C UCSI (`USBC000:00`)** | **Broken** | `\_SB.USC1._DSM` -> `\_SB.FFA0.EC14` -> `\_SB.FFA0.RBUF` aborts (`ucsi_acpi` probe fails with `-EIO`) |
 | **EC Notifications (`ARML0002:00`)** | **Broken** | `\_SB.FFA0._DSM` aborts in `\_SB.FFA0.RBUF` (`nvidia-ffa ARML0002:00: Failed to execute notify`) |
 
-## Detailed Documentation
+## Detailed Documentation & Kernel Fix
 
+- [**`kmod/omnibook_ffa_fix.c`**](kmod/omnibook_ffa_fix.c) ([`kmod/install.sh`](kmod/install.sh)) — Out-of-tree kernel module (with DKMS support) that patches `\_SB.FFA0.RBUF` (`CreateField` bit length `0x0190 -> 0x0130`) and `\_SB.BAT0._BST` (`UPBS () Return (PBST)`) in-memory and re-enumerates `BAT0`, `ADP1`, `TZ01`, `USC1`, and `FAN0` without rebooting.
 - [**ACPI FF-A EC (`\_SB.FFA0.RBUF`) `AE_AML_BUFFER_LIMIT` Root Cause Analysis**](docs/acpi-ffa-ec-rbuf-buffer-limit.md) — Complete diagnosis of why battery, AC adapter, thermal, fan, and USB-C UCSI ACPI methods fail on `linux-omarchy` `7.3-3.1`.
 - **Upstream Issue**: [`omacom/omarchy#18112`](https://github.com/omacom/omarchy/issues/18112)
