@@ -36,3 +36,4 @@ Hardware documentation, kernel diagnostics, and issue tracking for running **Oma
 ## Detailed Documentation
 
 - [**ACPI FF-A EC (`\_SB.FFA0.RBUF`) `AE_AML_BUFFER_LIMIT` Root Cause Analysis**](docs/acpi-ffa-ec-rbuf-buffer-limit.md) — Complete diagnosis of why battery, AC adapter, thermal, fan, and USB-C UCSI ACPI methods fail on `linux-omarchy` `7.3-3.1`.
+- **Upstream Issue**: [`omacom/omarchy#18112`](https://github.com/omacom/omarchy/issues/18112)
