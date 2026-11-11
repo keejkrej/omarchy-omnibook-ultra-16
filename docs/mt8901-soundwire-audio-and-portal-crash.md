@@ -187,3 +187,5 @@ And in the journal:
 rtkit-daemon[1205]: Successfully made thread 94695 of process 47356 owned by '1000' RT at priority 20.
 hex[47356]: INFO hex::audio: dictation microphone reopened device=Default Audio Device
 ```
+
+> **Next step for Hex dictation:** Because `xdg-desktop-portal-hyprland` does not auto-bind physical keys for `GlobalShortcuts` (and `hex` only subscribes to press events on the portal), hold-to-dictate shortcuts such as `Alt+D` must be bound in `~/.config/hypr/bindings.lua` using `o.bind_hold`. See [**Hex Voice Dictation (`hex-bin`) Hold-to-Dictate Shortcut on Hyprland / Omarchy**](hex-dictation-hyprland-shortcuts.md).
